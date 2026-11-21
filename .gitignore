@@ -58,5 +58,6 @@ ipython_config.py
 # Strava API records
 CLIENT_ID
 CLIENT_SECRET
+CLIENT_ID.txt
+CLIENT_SECRET.txt
 .strava_tokens.json
-.strava_login.lock
