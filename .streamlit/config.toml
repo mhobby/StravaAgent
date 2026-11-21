@@ -1,0 +1,8 @@
+# Only this computer can open the app (it shows your Strava data and uses
+# your Claude plan). Also avoids the Windows Firewall prompt.
+[server]
+address = "localhost"
+port = 8501
+
+[browser]
+gatherUsageStats = false
