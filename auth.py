@@ -1,18 +1,19 @@
 """OAuth for the Strava REST API (v3), using your own Strava API application.
 
-The MCP server logs in on first use via ensure_tokens(). To log in ahead of
-time instead:
+Your app's credentials are read from the files CLIENT_ID and CLIENT_SECRET
+(a .txt extension, as Windows Notepad adds, is also accepted).
+
+The MCP server logs in at startup via ensure_tokens(). To log in on its own:
 
     uv run python auth.py
 
-Messages go to stderr because, inside the stdio MCP server, stdout is the
-protocol channel. Tokens are stored in .strava_tokens.json (gitignored) and refreshed
+Tokens are stored in .strava_tokens.json (gitignored) and refreshed
 automatically by RefreshingOAuthAuth. Strava rotates refresh tokens, so the
-file is rewritten on every refresh.
+file is rewritten on every refresh. Messages go to stderr so they never mix
+with an MCP server's stdout.
 """
 
 import asyncio
-import fcntl
 import json
 import secrets
 import subprocess
@@ -29,11 +30,24 @@ import httpx
 
 ROOT = Path(__file__).resolve().parent
 TOKENS_PATH = ROOT / ".strava_tokens.json"
-LOGIN_LOCK_PATH = ROOT / ".strava_login.lock"
 LOGIN_TIMEOUT_SECONDS = 300
 
-STRAVA_CLIENT_ID = (ROOT / "CLIENT_ID").read_text().strip()
-STRAVA_CLIENT_SECRET = (ROOT / "CLIENT_SECRET").read_text().strip()
+
+def _read_credential(name: str) -> str:
+    """Read CLIENT_ID / CLIENT_SECRET from the project folder (or NAME.txt)."""
+    for path in (ROOT / name, ROOT / f"{name}.txt"):
+        if path.exists():
+            value = path.read_text(encoding="utf-8-sig").strip()  # -sig: Notepad BOM
+            if value:
+                return value
+    raise RuntimeError(
+        f"Missing Strava credential: create a file called {name} in {ROOT} "
+        "containing the value from https://www.strava.com/settings/api"
+    )
+
+
+STRAVA_CLIENT_ID = _read_credential("CLIENT_ID")
+STRAVA_CLIENT_SECRET = _read_credential("CLIENT_SECRET")
 STRAVA_AUTH_URL = "https://www.strava.com/oauth/authorize"
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
 STRAVA_SCOPES = "read,activity:read_all,profile:read_all"
@@ -205,15 +219,13 @@ def authorize_strava() -> OAuthTokens:
 def ensure_tokens() -> OAuthTokens:
     """Load saved tokens, or run the browser login if there are none.
 
-    The MCP adapter starts a fresh server process per tool call, so parallel
-    tool calls could each try to log in. A file lock makes exactly one process
-    open the browser; the others wait, then load the tokens it saved.
+    Not safe to call from several processes at once (each would open a login).
+    That's fine for the single long-running HTTP MCP server; concurrent calls
+    inside it are serialised by StravaAPI's asyncio lock.
     """
-    with LOGIN_LOCK_PATH.open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        if TOKENS_PATH.exists():
-            return OAuthTokens.load()
-        return authorize_strava()
+    if TOKENS_PATH.exists():
+        return OAuthTokens.load()
+    return authorize_strava()
 
 
 if __name__ == "__main__":
